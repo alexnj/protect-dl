@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.egg-info/
+.env
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+dist/
+build/
+# job folders created by running the tool in the checkout
+/*_to_*/
+*.mp4
+*.part
