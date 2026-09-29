@@ -21,12 +21,33 @@ def test_args(tmp_path):
     m = ffmpeg.merge_args(concat, out)
     assert m[m.index("-f") + 1] == "concat" and m[m.index("-c") + 1] == "copy" and m[-1] == str(out)
     t = ffmpeg.timelapse_args(concat, out, tmp_path / "f.txt", "libx264")
-    assert t[t.index("-filter_script:v") + 1] == str(tmp_path / "f.txt") and "-an" in t and "libx264" in t
+    assert t[t.index("-/filter:v") + 1] == str(tmp_path / "f.txt") and "-an" in t and "libx264" in t
+    old = ffmpeg.timelapse_args(concat, out, tmp_path / "f.txt", "libx264", script_option="-filter_script:v")
+    assert old[old.index("-filter_script:v") + 1] == str(tmp_path / "f.txt")
     assert "-progress" in m and "-progress" in t
     assert ffmpeg.timelapse_filter(60) == "setpts=PTS/60,fps=30"
     assert ffmpeg.timelapse_filter(60, ["drawtext=a"]) == "drawtext=a,setpts=PTS/60,fps=30"
     ms = ffmpeg.merge_args(concat, out, tmp_path / "s.srt")
     assert ms[ms.index("-c:s") + 1] == "mov_text" and "1:s" in ms
+
+
+@pytest.mark.parametrize("help_text,expected", [
+    # ffmpeg 6: only the old option
+    ("-filter_script filename  read stream filtergraph description from a file\n", "-filter_script:v"),
+    # ffmpeg 7: old option still listed (deprecated), new one available
+    ("-filter_script[:<stream_spec>] <filename>  deprecated, use -/filter\n", "-filter_script:v"),
+    # ffmpeg 8: old option removed
+    ("-filter[:<stream_spec>] <filter_graph>  apply specified filters\n", "-/filter:v"),
+])
+def test_filter_script_option_by_version(monkeypatch, help_text, expected):
+    ffmpeg.filter_script_option.cache_clear()
+    monkeypatch.setattr(ffmpeg, "require_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(ffmpeg.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=help_text))
+    try:
+        assert ffmpeg.filter_script_option() == expected
+    finally:
+        ffmpeg.filter_script_option.cache_clear()
 
 
 needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")

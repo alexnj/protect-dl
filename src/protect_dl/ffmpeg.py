@@ -38,6 +38,16 @@ def has_encoder(name: str) -> bool:
     return re.search(rf"^\s*\S+\s+{re.escape(name)}\s", out, re.MULTILINE) is not None
 
 
+@cache
+def filter_script_option() -> str:
+    """How to read a video filtergraph from a file. ffmpeg 7 added ``-/filter:v <file>`` and
+    deprecated ``-filter_script:v``; ffmpeg 8 removed the latter; ffmpeg 6 only has the latter."""
+    out = subprocess.run(
+        [require_ffmpeg(), "-hide_banner", "-h", "full"], capture_output=True, text=True
+    ).stdout
+    return "-filter_script:v" if re.search(r"^-filter_script\b", out, re.MULTILINE) else "-/filter:v"
+
+
 def is_playable(path: Path) -> bool | None:
     """Whether ffprobe can read a video duration from ``path``; None if ffprobe is missing."""
     if not shutil.which("ffprobe"):
@@ -90,13 +100,18 @@ def timelapse_filter(factor: float, overlay_filters: list[str] | None = None) ->
 
 
 def timelapse_args(
-    concat_file: Path, out: Path, filter_script: Path, encoder: str, srt: Path | None = None
+    concat_file: Path,
+    out: Path,
+    filter_script: Path,
+    encoder: str,
+    srt: Path | None = None,
+    script_option: str = "-/filter:v",
 ) -> list[str]:
     sub_in, sub_out = _subtitle_args(srt)
     return _base_args() + [
         "-hwaccel", "auto",
         "-f", "concat", "-safe", "0", "-i", str(concat_file), *sub_in,
-        "-map", "0:v", "-filter_script:v", str(filter_script),
+        "-map", "0:v", script_option, str(filter_script),
         "-an", *encoder_args(encoder), *sub_out, "-movflags", "+faststart", str(out),
     ]  # fmt: skip
 
@@ -211,7 +226,9 @@ def timelapse(
             label = f"Timelapse {factor:g}× {job.camera_name} ({encoder})"
             try:
                 with TaskReporter(console, label, seconds) as rep:
-                    args = timelapse_args(concat, tmp_out, filter_script, encoder, srt)
+                    args = timelapse_args(
+                        concat, tmp_out, filter_script, encoder, srt, filter_script_option()
+                    )
                     _run(args, rep, speedup=factor, tz=tz)
                 break
             except FfmpegError as e:
