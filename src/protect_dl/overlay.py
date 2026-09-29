@@ -6,13 +6,13 @@ gap inside a chunk's recording only skews the rest of that chunk, never the next
 from __future__ import annotations
 
 import math
-import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from . import tools
 from .job import Chunk, Job
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -28,7 +28,7 @@ class Segment:
 
 
 def probe_duration(path: Path) -> float | None:
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = tools.ffprobe()
     if not ffprobe:
         return None
     result = subprocess.run(

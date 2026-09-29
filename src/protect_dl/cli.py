@@ -246,7 +246,8 @@ def run(args: argparse.Namespace) -> int:
     if args.subtitles and not (args.merge or factor):
         raise UsageError("--subtitles applies to --merge and/or --timelapse")
     if args.merge or factor:
-        ffmpeg.require_ffmpeg()  # fail before a long download, not after it
+        # Fail before a long download, not after it.
+        ffmpeg.require_ffmpeg(*(["drawtext"] if args.burn_in else []))
     if args.camera and not args.download:
         raise UsageError("--camera is only used with --download (use --folder for existing jobs)")
 

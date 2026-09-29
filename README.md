@@ -104,7 +104,7 @@ These need `ffmpeg`, and they refuse to run on an incomplete folder unless you p
 
 - `--merge` joins the clips into one MP4 without re-encoding, so it's fast and loses no quality.
 - `--timelapse 60x` speeds the footage up 60 times and removes the audio. It uses the Mac's hardware HEVC encoder when available, and otherwise x264.
-- `--burn-in` draws the camera name and time into the timelapse.
+- `--burn-in` draws the camera name and time into the timelapse. It needs an ffmpeg with the `drawtext` filter. Homebrew's default `ffmpeg` doesn't have it, so run `brew install ffmpeg-full`. protect-dl finds that build automatically, even though Homebrew doesn't put it on your PATH. To use a different ffmpeg build, set `PROTECT_DL_FFMPEG` to its path.
 - `--subtitles` adds the camera name and time as a subtitle track to the merged file and/or the timelapse. It needs no re-encoding, and players can show or hide it.
 
 The time shown for each clip starts from that clip's own start time. If the recording has a gap inside a clip, the time after the gap runs early until the next clip begins. If you'd rather the camera draw its name and time into its recordings, turn on its overlay in Protect's camera settings.

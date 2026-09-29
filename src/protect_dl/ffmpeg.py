@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from functools import cache
@@ -12,45 +11,29 @@ from pathlib import Path
 
 from rich.console import Console
 
-from . import overlay
+from . import overlay, tools
 from .job import Chunk, Job
 from .progress import TaskReporter
+from .tools import FfmpegError
 
 TIMELAPSE_FPS = 30
 
 
-class FfmpegError(RuntimeError):
-    pass
-
-
-def require_ffmpeg() -> str:
-    path = shutil.which("ffmpeg")
-    if not path:
-        raise FfmpegError("ffmpeg not found on PATH (install it, e.g. `brew install ffmpeg`)")
-    return path
+def require_ffmpeg(*filters: str) -> str:
+    return tools.ffmpeg(*filters)
 
 
 @cache
-def has_encoder(name: str) -> bool:
-    out = subprocess.run(
-        [require_ffmpeg(), "-hide_banner", "-encoders"], capture_output=True, text=True
-    ).stdout
-    return re.search(rf"^\s*\S+\s+{re.escape(name)}\s", out, re.MULTILINE) is not None
-
-
-@cache
-def filter_script_option() -> str:
+def filter_script_option(binary: str) -> str:
     """How to read a video filtergraph from a file. ffmpeg 7 added ``-/filter:v <file>`` and
     deprecated ``-filter_script:v``; ffmpeg 8 removed the latter; ffmpeg 6 only has the latter."""
-    out = subprocess.run(
-        [require_ffmpeg(), "-hide_banner", "-h", "full"], capture_output=True, text=True
-    ).stdout
+    out = subprocess.run([binary, "-hide_banner", "-h", "full"], capture_output=True, text=True).stdout
     return "-filter_script:v" if re.search(r"^-filter_script\b", out, re.MULTILINE) else "-/filter:v"
 
 
 def is_playable(path: Path) -> bool | None:
     """Whether ffprobe can read a video duration from ``path``; None if ffprobe is missing."""
-    if not shutil.which("ffprobe"):
+    if not tools.ffprobe():
         return None
     duration = overlay.probe_duration(path)
     return duration is not None and duration > 0
@@ -63,9 +46,9 @@ def parse_factor(text: str) -> float:
     return float(match.group(1))
 
 
-def _base_args() -> list[str]:
+def _base_args(binary: str) -> list[str]:
     return [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+        binary, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
         "-progress", "pipe:1", "-nostats",
     ]  # fmt: skip
 
@@ -80,9 +63,11 @@ def _subtitle_args(srt: Path | None) -> tuple[list[str], list[str]]:
     ]  # fmt: skip
 
 
-def merge_args(concat_file: Path, out: Path, srt: Path | None = None) -> list[str]:
+def merge_args(
+    concat_file: Path, out: Path, srt: Path | None = None, binary: str = "ffmpeg"
+) -> list[str]:
     sub_in, sub_out = _subtitle_args(srt)
-    return _base_args() + [
+    return _base_args(binary) + [
         "-f", "concat", "-safe", "0", "-i", str(concat_file), *sub_in,
         "-map", "0", "-c", "copy", *sub_out, "-movflags", "+faststart", str(out),
     ]  # fmt: skip
@@ -106,9 +91,10 @@ def timelapse_args(
     encoder: str,
     srt: Path | None = None,
     script_option: str = "-/filter:v",
+    binary: str = "ffmpeg",
 ) -> list[str]:
     sub_in, sub_out = _subtitle_args(srt)
-    return _base_args() + [
+    return _base_args(binary) + [
         "-hwaccel", "auto",
         "-f", "concat", "-safe", "0", "-i", str(concat_file), *sub_in,
         "-map", "0:v", script_option, str(filter_script),
@@ -163,7 +149,7 @@ def _concat(job: Job, tmpdir: Path) -> tuple[Path, list[Chunk]]:
 
 
 def _segments(job: Job, chunks: list[Chunk], console: Console) -> list[overlay.Segment]:
-    if not shutil.which("ffprobe"):
+    if not tools.ffprobe():
         console.print("[yellow]ffprobe not found; timestamps assume every chunk is its full length[/]")
     with console.status(f"Measuring {len(chunks)} chunks for timestamps…"):
         return overlay.segments(job, chunks)
@@ -176,6 +162,7 @@ def merge(
     if not _confirm_overwrite(out, overwrite, console):
         return None
     tmp_out = out.with_suffix(".tmp.mp4")
+    binary = require_ffmpeg()
     with tempfile.TemporaryDirectory() as d:
         tmpdir = Path(d)
         concat, chunks = _concat(job, tmpdir)
@@ -186,7 +173,7 @@ def merge(
         seconds = sum(c.seconds for c in chunks)
         with TaskReporter(console, f"Merging {job.camera_name}", seconds) as rep:
             try:
-                _run(merge_args(concat, tmp_out, srt), rep)
+                _run(merge_args(concat, tmp_out, srt, binary), rep)
             except BaseException:
                 tmp_out.unlink(missing_ok=True)
                 raise
@@ -206,8 +193,9 @@ def timelapse(
     if not _confirm_overwrite(out, overwrite, console):
         return None
     tmp_out = out.with_suffix(".tmp.mp4")
+    binary = require_ffmpeg("drawtext") if burn_in else require_ffmpeg()
     encoders = ["libx264"]
-    if has_encoder("hevc_videotoolbox"):
+    if tools.has_encoder(binary, "hevc_videotoolbox"):
         encoders.insert(0, "hevc_videotoolbox")
     with tempfile.TemporaryDirectory() as d:
         tmpdir = Path(d)
@@ -227,8 +215,9 @@ def timelapse(
             try:
                 with TaskReporter(console, label, seconds) as rep:
                     args = timelapse_args(
-                        concat, tmp_out, filter_script, encoder, srt, filter_script_option()
-                    )
+                        concat, tmp_out, filter_script, encoder, srt,
+                        filter_script_option(binary), binary,
+                    )  # fmt: skip
                     _run(args, rep, speedup=factor, tz=tz)
                 break
             except FfmpegError as e:

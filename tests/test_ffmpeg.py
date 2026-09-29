@@ -5,7 +5,7 @@ import subprocess
 import pytest
 from rich.console import Console
 
-from protect_dl import ffmpeg
+from protect_dl import ffmpeg, tools
 
 
 def test_parse_factor():
@@ -41,16 +41,27 @@ def test_args(tmp_path):
 ])
 def test_filter_script_option_by_version(monkeypatch, help_text, expected):
     ffmpeg.filter_script_option.cache_clear()
-    monkeypatch.setattr(ffmpeg, "require_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(ffmpeg.subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=help_text))
     try:
-        assert ffmpeg.filter_script_option() == expected
+        assert ffmpeg.filter_script_option("ffmpeg") == expected
     finally:
         ffmpeg.filter_script_option.cache_clear()
 
 
 needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+
+
+def _drawtext_available():
+    try:
+        tools.ffmpeg("drawtext")
+        return True
+    except tools.FfmpegError:
+        return False
+
+
+# Homebrew's default ffmpeg has no drawtext; test_tools covers how that is reported.
+needs_drawtext = pytest.mark.skipif(not _drawtext_available(), reason="no ffmpeg with drawtext")
 
 
 def duration(path):
@@ -83,6 +94,7 @@ def streams(path):
 
 
 @needs_ffmpeg
+@needs_drawtext
 def test_subtitles_and_burn_in_real(make_job):
     from datetime import timedelta
     job = make_job(hours=1, chunk=timedelta(minutes=20))
